@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMC + Liquidity + Volume | MTF Strategy</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg:      #0D1117;
+    --panel:   #161B22;
+    --border:  #21262D;
+    --accent:  #58A6FF;
+    --green:   #00E676;
+    --red:     #FF1744;
+    --amber:   #FFA000;
+    --text:    #E6EDF3;
+    --muted:   #8B949E;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    padding: 40px 24px;
+  }
+
+  .grid-bg {
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(88,166,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(88,166,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .container { max-width: 960px; margin: 0 auto; position: relative; }
+
+  /* HEADER */
+  .header {
+    text-align: center;
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+  .header .badge {
+    display: inline-block;
+    background: rgba(88,166,255,0.1);
+    border: 1px solid rgba(88,166,255,0.3);
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    padding: 4px 16px;
+    border-radius: 2px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+  .header h1 {
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1.1;
+    background: linear-gradient(135deg, #E6EDF3 0%, var(--accent) 50%, #00E676 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+  }
+  .header p {
+    color: var(--muted);
+    font-size: 15px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* TIMEFRAME FLOW */
+  .tf-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 40px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .tf-item {
+    flex: 1;
+    padding: 24px 20px;
+    text-align: center;
+    border-right: 1px solid var(--border);
+    position: relative;
+  }
+  .tf-item:last-child { border-right: none; }
+  .tf-item .tf-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .tf-item .tf-role { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 6px; }
+  .tf-item .tf-desc { font-size: 13px; color: var(--text); }
+  .tf-4h .tf-label { color: #B388FF; }
+  .tf-1h .tf-label { color: var(--accent); }
+  .tf-15 .tf-label { color: var(--green); }
+
+  .arrow-connector {
+    width: 32px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 18px;
+  }
+
+  /* SECTION TITLE */
+  .section-title {
+    font-size: 11px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 3px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* COMPONENTS GRID */
+  .components-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 40px;
+  }
+  .component-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .component-card:hover { border-color: rgba(88,166,255,0.4); }
+  .component-card .icon { font-size: 28px; margin-bottom: 10px; }
+  .component-card h3 { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .component-card p { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+  /* SIGNAL RULES */
+  .signal-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 40px;
+  }
+  .signal-card {
+    border-radius: 8px;
+    padding: 24px;
+    border: 1px solid;
+  }
+  .signal-buy {
+    background: rgba(0,230,118,0.05);
+    border-color: rgba(0,230,118,0.25);
+  }
+  .signal-sell {
+    background: rgba(255,23,68,0.05);
+    border-color: rgba(255,23,68,0.25);
+  }
+  .signal-card h2 {
+    font-size: 18px;
+    font-weight: 800;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .signal-buy h2 { color: var(--green); }
+  .signal-sell h2 { color: var(--red); }
+  .rule-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .rule-row:last-child { border-bottom: none; }
+  .rule-row .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+  .dot-green { background: var(--green); }
+  .dot-red   { background: var(--red); }
+  .rule-row .rule-label { color: var(--muted); width: 80px; flex-shrink: 0; font-family: 'Space Mono', monospace; font-size: 11px; }
+  .rule-row .rule-text  { color: var(--text); }
+
+  /* SL/TP TABLE */
+  .sltp-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 40px;
+    font-size: 13px;
+  }
+  .sltp-table th {
+    background: var(--panel);
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .sltp-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .sltp-table tr:last-child td { border-bottom: none; }
+  .pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .pill-sl   { background: rgba(255,23,68,0.15); color: var(--red); }
+  .pill-tp1  { background: rgba(105,240,174,0.15); color: #69F0AE; }
+  .pill-tp2  { background: rgba(0,230,118,0.15); color: var(--green); }
+  .pill-tp3  { background: rgba(0,191,165,0.15); color: #00BFA5; }
+
+  /* ALERTS */
+  .alerts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 40px;
+  }
+  .alert-item {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .alert-item .alert-icon { font-size: 16px; margin-bottom: 6px; }
+  .alert-item .alert-name { color: var(--text); font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+
+  /* FOOTER */
+  .footer {
+    text-align: center;
+    padding: 32px 0 0;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+  }
+
+  @media (max-width: 600px) {
+    .signal-grid { grid-template-columns: 1fr; }
+    .tf-flow { flex-direction: column; }
+    .tf-item { border-right: none; border-bottom: 1px solid var(--border); }
+    .tf-item:last-child { border-bottom: none; }
+  }
+</style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="badge">Pine Script v5 · TradingView</div>
+    <h1>SMC + Liquidity + Volume</h1>
+    <p>Multi-Timeframe Smart Money Strategy Indicator</p>
+  </div>
+
+  <!-- TIMEFRAME FLOW -->
+  <div class="section-title">Timeframe Framework</div>
+  <div class="tf-flow">
+    <div class="tf-item tf-4h">
+      <div class="tf-label">4H</div>
+      <div class="tf-role">Trend Finder</div>
+      <div class="tf-desc">EMA 20/50/200 stack<br>HTF Bias Direction</div>
+    </div>
+    <div class="arrow-connector">→</div>
+    <div class="tf-item tf-1h">
+      <div class="tf-label">1H</div>
+      <div class="tf-role">Trade Setup</div>
+      <div class="tf-desc">Structure + RSI<br>Volume Confirmation</div>
+    </div>
+    <div class="arrow-connector">→</div>
+    <div class="tf-item tf-15">
+      <div class="tf-label">15M</div>
+      <div class="tf-role">Entry Point</div>
+      <div class="tf-desc">OB · FVG · BOS · CHoCH<br>Liquidity Sweep</div>
+    </div>
+  </div>
+
+  <!-- COMPONENTS -->
+  <div class="section-title">Strategy Components</div>
+  <div class="components-grid">
+    <div class="component-card">
+      <div class="icon">🧠</div>
+      <h3>Order Blocks (OB)</h3>
+      <p>Last opposing candle before impulsive move. Bullish OB = demand zone, Bearish OB = supply zone.</p>
+    </div>
+    <div class="component-card">
+      <div class="icon">⚖️</div>
+      <h3>Fair Value Gaps (FVG)</h3>
+      <p>3-candle imbalance where price moved too fast. Price tends to return and fill these gaps.</p>
+    </div>
+    <div class="component-card">
+      <div class="icon">🔄</div>
+      <h3>BOS / CHoCH</h3>
+      <p>Break of Structure signals trend continuation. Change of Character signals early reversal.</p>
+    </div>
+    <div class="component-card">
+      <div class="icon">💧</div>
+      <h3>Liquidity Sweeps</h3>
+      <p>SSL sweep = stop hunt below lows → bullish reversal. BSL sweep = above highs → bearish reversal.</p>
+    </div>
+    <div class="component-card">
+      <div class="icon">📊</div>
+      <h3>Volume Surge</h3>
+      <p>Volume 1.5× above MA confirms institutional participation. Volume delta filters directional flow.</p>
+    </div>
+    <div class="component-card">
+      <div class="icon">📈</div>
+      <h3>VWAP + EMA</h3>
+      <p>VWAP as fair value anchor. EMA 20/50/200 stack defines macro trend on each timeframe.</p>
+    </div>
+  </div>
+
+  <!-- SIGNAL RULES -->
+  <div class="section-title">Signal Logic</div>
+  <div class="signal-grid">
+    <div class="signal-card signal-buy">
+      <h2><span>▲</span> BUY Signal</h2>
+      <div class="rule-row">
+        <div class="dot dot-green"></div>
+        <div class="rule-label">4H</div>
+        <div class="rule-text">EMA 20 > 50 > 200 · Price above EMA20</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-green"></div>
+        <div class="rule-label">1H</div>
+        <div class="rule-text">Bullish EMA structure · RSI 45–70</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-green"></div>
+        <div class="rule-label">ENTRY</div>
+        <div class="rule-text">Inside Bullish OB or FVG · SSL swept</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-green"></div>
+        <div class="rule-label">STRUCT</div>
+        <div class="rule-text">Bullish BOS or CHoCH confirmed</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-green"></div>
+        <div class="rule-label">VOLUME</div>
+        <div class="rule-text">Volume surge + positive delta</div>
+      </div>
+    </div>
+    <div class="signal-card signal-sell">
+      <h2><span>▼</span> SELL Signal</h2>
+      <div class="rule-row">
+        <div class="dot dot-red"></div>
+        <div class="rule-label">4H</div>
+        <div class="rule-text">EMA 20 &lt; 50 &lt; 200 · Price below EMA20</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-red"></div>
+        <div class="rule-label">1H</div>
+        <div class="rule-text">Bearish EMA structure · RSI 30–55</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-red"></div>
+        <div class="rule-label">ENTRY</div>
+        <div class="rule-text">Inside Bearish OB or FVG · BSL swept</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-red"></div>
+        <div class="rule-label">STRUCT</div>
+        <div class="rule-text">Bearish BOS or CHoCH confirmed</div>
+      </div>
+      <div class="rule-row">
+        <div class="dot dot-red"></div>
+        <div class="rule-label">VOLUME</div>
+        <div class="rule-text">Volume surge + negative delta</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SL/TP TABLE -->
+  <div class="section-title">Stop Loss & Take Profit Framework</div>
+  <table class="sltp-table">
+    <thead>
+      <tr>
+        <th>Level</th>
+        <th>Formula</th>
+        <th>Default</th>
+        <th>Purpose</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="pill pill-sl">STOP LOSS</span></td>
+        <td>Entry ± (ATR14 × 1.5)</td>
+        <td>1.5× ATR</td>
+        <td>Below/above OB structure — protects against noise</td>
+      </tr>
+      <tr>
+        <td><span class="pill pill-tp1">TP1</span></td>
+        <td>Entry + (SL-dist × 1.5)</td>
+        <td>1.5R</td>
+        <td>Close 50% position — secure quick profit</td>
+      </tr>
+      <tr>
+        <td><span class="pill pill-tp2">TP2</span></td>
+        <td>Entry + (SL-dist × 3.0)</td>
+        <td>3.0R</td>
+        <td>Close 30% — ride mid-move momentum</td>
+      </tr>
+      <tr>
+        <td><span class="pill pill-tp3">TP3</span></td>
+        <td>Entry + (SL-dist × 5.0)</td>
+        <td>5.0R</td>
+        <td>Close 20% — let runners go for full swing</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ALERTS -->
+  <div class="section-title">Built-in Alerts (6 Total)</div>
+  <div class="alerts-grid">
+    <div class="alert-item">
+      <div class="alert-icon">🟢</div>
+      <div class="alert-name">SMC BUY Signal</div>
+      All conditions met for long entry
+    </div>
+    <div class="alert-item">
+      <div class="alert-icon">🔴</div>
+      <div class="alert-name">SMC SELL Signal</div>
+      All conditions met for short entry
+    </div>
+    <div class="alert-item">
+      <div class="alert-icon">⚡</div>
+      <div class="alert-name">SSL Swept</div>
+      Sell-side liquidity grab (bullish)
+    </div>
+    <div class="alert-item">
+      <div class="alert-icon">⚡</div>
+      <div class="alert-name">BSL Swept</div>
+      Buy-side liquidity grab (bearish)
+    </div>
+    <div class="alert-item">
+      <div class="alert-icon">📈</div>
+      <div class="alert-name">Bullish BOS</div>
+      Break of structure to the upside
+    </div>
+    <div class="alert-item">
+      <div class="alert-icon">📉</div>
+      <div class="alert-name">Bearish BOS</div>
+      Break of structure to the downside
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>SMC + Liquidity + Volume MTF Indicator · Pine Script v5 · TradingView</p>
+    <p style="margin-top:8px">For educational purposes only. Always manage risk. Past performance ≠ future results.</p>
+  </div>
+
+</div>
+</body>
+</html>

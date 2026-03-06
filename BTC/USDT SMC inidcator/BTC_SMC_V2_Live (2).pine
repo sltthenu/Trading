@@ -1,0 +1,549 @@
+// ═══════════════════════════════════════════════════════════════
+// BTC/USDT — Smart Money Concepts + Liquidity V2
+// ═══════════════════════════════════════════════════════════════
+//@version=5
+indicator("BTC SMC + Liquidity V2 [Day Trading]", shorttitle="BTC-SMC-V2",
+  overlay=true, max_bars_back=500,
+  max_lines_count=200, max_boxes_count=200, max_labels_count=200)
+
+// ─────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────
+
+i_swing_len  = input.int(10,   "Swing Length",                    group="Structure")
+i_show_bos   = input.bool(true,"Show BOS/CHoCH Labels",           group="Structure")
+
+i_show_ob    = input.bool(true,"Show Order Blocks",               group="Order Blocks")
+i_ob_extend  = input.int(40,   "OB Extend Bars",                  group="Order Blocks")
+i_ob_bull    = input.color(color.new(color.green,80),"Bull OB",   group="Order Blocks")
+i_ob_bear    = input.color(color.new(color.red,  80),"Bear OB",   group="Order Blocks")
+
+i_show_fvg   = input.bool(true,"Show FVG",                        group="FVG")
+i_fvg_bull   = input.color(color.new(color.aqua,  85),"Bull FVG", group="FVG")
+i_fvg_bear   = input.color(color.new(color.orange,85),"Bear FVG", group="FVG")
+
+i_show_liq   = input.bool(true,"Show EQH/EQL",                    group="Liquidity")
+i_show_sweep = input.bool(true,"Show Sweeps",                      group="Liquidity")
+i_liq_lb     = input.int(50,  "Sweep Lookback",                   group="Liquidity")
+i_eq_thresh  = input.float(0.1,"EQH/EQL Threshold %",             group="Liquidity")
+
+i_show_pd    = input.bool(true,"Show Equilibrium Line",            group="Premium/Discount")
+i_pd_lb      = input.int(100, "Range Lookback",                   group="Premium/Discount")
+
+i_show_ema   = input.bool(true,"Show EMAs",                        group="EMAs")
+i_ema_fast   = input.int(21,  "Fast EMA",                         group="EMAs")
+i_ema_slow   = input.int(200, "Slow EMA",                         group="EMAs")
+
+i_vol_len    = input.int(20,  "Vol MA Length",                    group="Volume")
+i_vol_mult   = input.float(1.5,"Vol Multiplier",                  group="Volume")
+
+i_atr_len    = input.int(14,  "ATR Length",                       group="Risk")
+i_sl_mult    = input.float(1.5,"SL ATR Mult",                     group="Risk")
+i_tp_rr      = input.float(2.0,"TP R:R",                          group="Risk")
+
+i_use_sess   = input.bool(false,"Session Filter (London/NY only)", group="Session")
+i_sess_lon   = input.session("0700-1000","London UTC",             group="Session")
+i_sess_ny    = input.session("1300-1700","NY Open UTC",            group="Session")
+
+i_show_sig   = input.bool(true,"Show Signal Labels",               group="Display")
+i_show_tpsl  = input.bool(true,"Show TP/SL Lines",                 group="Display")
+i_show_dash  = input.bool(true,"Show Dashboard",                   group="Display")
+i_min_score  = input.int(3,   "Min Score to Signal (1-6)",        group="Display", minval=1, maxval=6)
+
+// ─────────────────────────────────────────────────────────────
+// BASE CALCS
+// ─────────────────────────────────────────────────────────────
+
+float atr    = ta.atr(i_atr_len)
+float ema21  = ta.ema(close, i_ema_fast)
+float ema200 = ta.ema(close, i_ema_slow)
+float vol_ma = ta.sma(volume, i_vol_len)
+bool  vol_ok = volume > vol_ma * i_vol_mult
+
+bool in_lon  = not na(time(timeframe.period, i_sess_lon, "UTC"))
+bool in_ny   = not na(time(timeframe.period, i_sess_ny,  "UTC"))
+bool in_sess = in_lon or in_ny
+bool sess_ok = i_use_sess ? in_sess : true
+
+// ─────────────────────────────────────────────────────────────
+// SWING HIGHS / LOWS
+// ─────────────────────────────────────────────────────────────
+
+float ph = ta.pivothigh(high, i_swing_len, i_swing_len)
+float pl = ta.pivotlow (low,  i_swing_len, i_swing_len)
+
+var float last_sh = na
+var float last_sl = na
+var int   sh_bar  = na
+var int   sl_bar  = na
+
+if not na(ph)
+    last_sh := ph
+    sh_bar  := bar_index - i_swing_len
+if not na(pl)
+    last_sl := pl
+    sl_bar  := bar_index - i_swing_len
+
+// ─────────────────────────────────────────────────────────────
+// MARKET STRUCTURE — BOS / CHoCH
+// ─────────────────────────────────────────────────────────────
+
+var int   bias      = 0
+var float bos_level = na
+
+bool bos_bull   = false
+bool bos_bear   = false
+bool choch_bull = false
+bool choch_bear = false
+
+if not na(last_sh) and close > last_sh and close[1] <= last_sh
+    if bias >= 0
+        bos_bull   := true
+    else
+        choch_bull := true
+    bias      := 1
+    bos_level := last_sh
+
+if not na(last_sl) and close < last_sl and close[1] >= last_sl
+    if bias <= 0
+        bos_bear   := true
+    else
+        choch_bear := true
+    bias      := -1
+    bos_level := last_sl
+
+if i_show_bos
+    if bos_bull
+        label.new(bar_index, low  - atr*0.4, "BOS ▲",
+          style=label.style_label_up,   color=color.new(color.green,20),  textcolor=color.white, size=size.small)
+    if bos_bear
+        label.new(bar_index, high + atr*0.4, "BOS ▼",
+          style=label.style_label_down, color=color.new(color.red,20),    textcolor=color.white, size=size.small)
+    if choch_bull
+        label.new(bar_index, low  - atr*0.4, "CHoCH ▲",
+          style=label.style_label_up,   color=color.new(color.lime,10),   textcolor=color.black, size=size.small)
+    if choch_bear
+        label.new(bar_index, high + atr*0.4, "CHoCH ▼",
+          style=label.style_label_down, color=color.new(color.orange,10), textcolor=color.black, size=size.small)
+
+// ─────────────────────────────────────────────────────────────
+// ORDER BLOCKS  — extended every bar via box.set_right()
+// ─────────────────────────────────────────────────────────────
+
+var float bull_ob_hi = na
+var float bull_ob_lo = na
+var float bear_ob_hi = na
+var float bear_ob_lo = na
+var box   bull_ob_bx = na
+var box   bear_ob_bx = na
+
+if bos_bull or choch_bull
+    for i = 1 to 5
+        if close[i] < open[i]
+            bull_ob_hi := math.max(open[i], close[i])
+            bull_ob_lo := math.min(open[i], close[i])
+            if i_show_ob
+                box.delete(bull_ob_bx)
+                bull_ob_bx := box.new(bar_index - i, bull_ob_hi, bar_index + i_ob_extend, bull_ob_lo,
+                  border_color=color.green, bgcolor=i_ob_bull, border_width=1)
+                label.new(bar_index - i, bull_ob_hi, "Bull OB",
+                  style=label.style_label_right, color=color.new(color.green,40), textcolor=color.white, size=size.tiny)
+            break
+
+if bos_bear or choch_bear
+    for i = 1 to 5
+        if close[i] > open[i]
+            bear_ob_hi := math.max(open[i], close[i])
+            bear_ob_lo := math.min(open[i], close[i])
+            if i_show_ob
+                box.delete(bear_ob_bx)
+                bear_ob_bx := box.new(bar_index - i, bear_ob_hi, bar_index + i_ob_extend, bear_ob_lo,
+                  border_color=color.red, bgcolor=i_ob_bear, border_width=1)
+                label.new(bar_index - i, bear_ob_hi, "Bear OB",
+                  style=label.style_label_right, color=color.new(color.red,40), textcolor=color.white, size=size.tiny)
+            break
+
+if i_show_ob
+    if not na(bull_ob_bx)
+        box.set_right(bull_ob_bx, bar_index + i_ob_extend)
+    if not na(bear_ob_bx)
+        box.set_right(bear_ob_bx, bar_index + i_ob_extend)
+
+if not na(bull_ob_lo) and close < bull_ob_lo
+    bull_ob_hi := na
+    bull_ob_lo := na
+    bull_ob_bx := na
+if not na(bear_ob_hi) and close > bear_ob_hi
+    bear_ob_hi := na
+    bear_ob_lo := na
+    bear_ob_bx := na
+
+bool in_bull_ob = not na(bull_ob_hi) and close >= bull_ob_lo and close <= bull_ob_hi
+bool in_bear_ob = not na(bear_ob_hi) and close >= bear_ob_lo and close <= bear_ob_hi
+
+// ─────────────────────────────────────────────────────────────
+// FAIR VALUE GAPS  — extended every bar via box.set_right()
+// ─────────────────────────────────────────────────────────────
+
+bool bull_fvg = low  > high[2]
+bool bear_fvg = high < low[2]
+
+var float fvg_bull_hi = na
+var float fvg_bull_lo = na
+var float fvg_bear_hi = na
+var float fvg_bear_lo = na
+var box   fvg_bull_bx = na
+var box   fvg_bear_bx = na
+
+if bull_fvg
+    fvg_bull_hi := low
+    fvg_bull_lo := high[2]
+    if i_show_fvg
+        box.delete(fvg_bull_bx)
+        fvg_bull_bx := box.new(bar_index - 2, fvg_bull_hi, bar_index + 15, fvg_bull_lo,
+          border_color=color.new(color.aqua,50), bgcolor=i_fvg_bull, border_width=1)
+
+if bear_fvg
+    fvg_bear_hi := low[2]
+    fvg_bear_lo := high
+    if i_show_fvg
+        box.delete(fvg_bear_bx)
+        fvg_bear_bx := box.new(bar_index - 2, fvg_bear_hi, bar_index + 15, fvg_bear_lo,
+          border_color=color.new(color.orange,50), bgcolor=i_fvg_bear, border_width=1)
+
+if i_show_fvg
+    if not na(fvg_bull_bx)
+        box.set_right(fvg_bull_bx, bar_index + 15)
+    if not na(fvg_bear_bx)
+        box.set_right(fvg_bear_bx, bar_index + 15)
+
+if not na(fvg_bull_lo) and close < fvg_bull_lo
+    fvg_bull_hi := na
+    fvg_bull_lo := na
+    fvg_bull_bx := na
+if not na(fvg_bear_hi) and close > fvg_bear_hi
+    fvg_bear_hi := na
+    fvg_bear_lo := na
+    fvg_bear_bx := na
+
+bool in_bull_fvg = not na(fvg_bull_hi) and close >= fvg_bull_lo and close <= fvg_bull_hi
+bool in_bear_fvg = not na(fvg_bear_hi) and close >= fvg_bear_lo and close <= fvg_bear_hi
+
+// ─────────────────────────────────────────────────────────────
+// LIQUIDITY — EQH / EQL  — extended every bar via line.set_x2()
+// ─────────────────────────────────────────────────────────────
+
+var float[] arr_hi     = array.new_float()
+var float[] arr_lo     = array.new_float()
+var int[]   arr_hi_bar = array.new_int()
+var int[]   arr_lo_bar = array.new_int()
+
+if not na(ph)
+    array.push(arr_hi, ph)
+    array.push(arr_hi_bar, bar_index - i_swing_len)
+    if array.size(arr_hi) > 10
+        array.shift(arr_hi)
+        array.shift(arr_hi_bar)
+
+if not na(pl)
+    array.push(arr_lo, pl)
+    array.push(arr_lo_bar, bar_index - i_swing_len)
+    if array.size(arr_lo) > 10
+        array.shift(arr_lo)
+        array.shift(arr_lo_bar)
+
+var line  eqh_ln   = na
+var line  eql_ln   = na
+var float last_eqh = na
+var float last_eql = na
+
+if i_show_liq and array.size(arr_hi) >= 2
+    float h1 = array.get(arr_hi,     array.size(arr_hi)     - 1)
+    float h2 = array.get(arr_hi,     array.size(arr_hi)     - 2)
+    int   b1 = array.get(arr_hi_bar, array.size(arr_hi_bar) - 2)
+    if math.abs(h1 - h2) / h2 * 100 <= i_eq_thresh and h1 != last_eqh
+        last_eqh := h1
+        line.delete(eqh_ln)
+        eqh_ln := line.new(b1, h1, bar_index, h1,
+          color=color.new(color.red,40), style=line.style_dotted, width=2)
+        label.new(bar_index, h1, "EQH 💧",
+          style=label.style_label_left, color=color.new(color.red,60), textcolor=color.white, size=size.tiny)
+
+if i_show_liq and array.size(arr_lo) >= 2
+    float l1 = array.get(arr_lo,     array.size(arr_lo)     - 1)
+    float l2 = array.get(arr_lo,     array.size(arr_lo)     - 2)
+    int   b2 = array.get(arr_lo_bar, array.size(arr_lo_bar) - 2)
+    if math.abs(l1 - l2) / l2 * 100 <= i_eq_thresh and l1 != last_eql
+        last_eql := l1
+        line.delete(eql_ln)
+        eql_ln := line.new(b2, l1, bar_index, l1,
+          color=color.new(color.green,40), style=line.style_dotted, width=2)
+        label.new(bar_index, l1, "EQL 💧",
+          style=label.style_label_left, color=color.new(color.green,60), textcolor=color.white, size=size.tiny)
+
+if not na(eqh_ln)
+    line.set_x2(eqh_ln, bar_index)
+if not na(eql_ln)
+    line.set_x2(eql_ln, bar_index)
+
+// ─────────────────────────────────────────────────────────────
+// LIQUIDITY SWEEPS
+// ─────────────────────────────────────────────────────────────
+
+float r_hi = ta.highest(high, i_liq_lb)
+float r_lo = ta.lowest (low,  i_liq_lb)
+
+bool bull_sweep = low  < r_lo[1] and close > r_lo[1] and vol_ok
+bool bear_sweep = high > r_hi[1] and close < r_hi[1] and vol_ok
+
+if i_show_sweep
+    if bull_sweep
+        label.new(bar_index, low  - atr*0.3, "🧹 Bull Sweep",
+          style=label.style_label_up,   color=color.new(color.teal,10),   textcolor=color.white, size=size.small)
+    if bear_sweep
+        label.new(bar_index, high + atr*0.3, "🧹 Bear Sweep",
+          style=label.style_label_down, color=color.new(color.maroon,10), textcolor=color.white, size=size.small)
+
+// ─────────────────────────────────────────────────────────────
+// PREMIUM / DISCOUNT  &  EMAs
+// ─────────────────────────────────────────────────────────────
+
+float rng_hi = ta.highest(high, i_pd_lb)
+float rng_lo = ta.lowest (low,  i_pd_lb)
+float eq_mid = (rng_hi + rng_lo) / 2.0
+
+bool in_disc = close < eq_mid
+bool in_prem = close > eq_mid
+
+plot(i_show_pd  ? eq_mid : na, "Equilibrium", color=color.new(color.white,60), linewidth=1, style=plot.style_circles)
+plot(i_show_ema ? ema21  : na, "EMA 21",      color=color.new(color.yellow,20), linewidth=1)
+plot(i_show_ema ? ema200 : na, "EMA 200",     color=color.new(color.white,40),  linewidth=2)
+
+bool ema_bull = ema21 > ema200
+bool ema_bear = ema21 < ema200
+
+// ─────────────────────────────────────────────────────────────
+// SIGNAL SCORING  (1 pt each, max 6)
+// ─────────────────────────────────────────────────────────────
+
+int ls1 = bias == 1                              ? 1 : 0
+int ls2 = (bos_bull or choch_bull or bull_sweep) ? 1 : 0
+int ls3 = in_bull_ob                             ? 1 : 0
+int ls4 = in_bull_fvg                            ? 1 : 0
+int ls5 = in_disc                                ? 1 : 0
+int ls6 = (ema_bull and vol_ok)                  ? 1 : 0
+int long_score = ls1 + ls2 + ls3 + ls4 + ls5 + ls6
+
+int ss1 = bias == -1                             ? 1 : 0
+int ss2 = (bos_bear or choch_bear or bear_sweep) ? 1 : 0
+int ss3 = in_bear_ob                             ? 1 : 0
+int ss4 = in_bear_fvg                            ? 1 : 0
+int ss5 = in_prem                                ? 1 : 0
+int ss6 = (ema_bear and vol_ok)                  ? 1 : 0
+int short_score = ss1 + ss2 + ss3 + ss4 + ss5 + ss6
+
+// ─────────────────────────────────────────────────────────────
+// SIGNALS  (session filter OFF by default)
+// ─────────────────────────────────────────────────────────────
+
+bool long_trig = bos_bull  or choch_bull or bull_sweep
+bool shrt_trig = bos_bear  or choch_bear or bear_sweep
+
+bool long_sig  = long_score  >= i_min_score and long_trig and sess_ok
+bool short_sig = short_score >= i_min_score and shrt_trig and sess_ok
+
+// ─────────────────────────────────────────────────────────────
+// BUY / SELL ARROWS
+// ─────────────────────────────────────────────────────────────
+
+plotshape(long_sig,  title="BUY",  shape=shape.triangleup,
+  location=location.belowbar, color=color.new(color.lime,0),
+  size=size.large, text="BUY")
+
+plotshape(short_sig, title="SELL", shape=shape.triangledown,
+  location=location.abovebar, color=color.new(color.red,0),
+  size=size.large, text="SELL")
+
+// ─────────────────────────────────────────────────────────────
+// SIGNAL LABELS
+// ─────────────────────────────────────────────────────────────
+
+if i_show_sig and long_sig
+    float sl_p = close - atr * i_sl_mult
+    float tp_p = close + atr * i_sl_mult * i_tp_rr
+    string why = choch_bull ? "CHoCH ▲" : bull_sweep ? "Sweep" : "BOS ▲"
+    label.new(bar_index, low - atr*1.2,
+      "🟢 BUY\n" + why
+      + (in_bull_ob  ? " + OB"       : "")
+      + (in_bull_fvg ? " + FVG"      : "")
+      + (in_disc     ? " + Discount" : "")
+      + "\nScore: " + str.tostring(long_score)        + "/6"
+      + "\nEntry: " + str.tostring(math.round(close,  1))
+      + "\nSL:    " + str.tostring(math.round(sl_p,   1))
+      + "\nTP:    " + str.tostring(math.round(tp_p,   1))
+      + "\nR:R  1:" + str.tostring(i_tp_rr),
+      style=label.style_label_up,
+      color=color.new(color.green,5), textcolor=color.white, size=size.normal)
+
+if i_show_sig and short_sig
+    float sl_p = close + atr * i_sl_mult
+    float tp_p = close - atr * i_sl_mult * i_tp_rr
+    string why = choch_bear ? "CHoCH ▼" : bear_sweep ? "Sweep" : "BOS ▼"
+    label.new(bar_index, high + atr*1.2,
+      "🔴 SELL\n" + why
+      + (in_bear_ob  ? " + OB"      : "")
+      + (in_bear_fvg ? " + FVG"     : "")
+      + (in_prem     ? " + Premium" : "")
+      + "\nScore: " + str.tostring(short_score)       + "/6"
+      + "\nEntry: " + str.tostring(math.round(close,  1))
+      + "\nSL:    " + str.tostring(math.round(sl_p,   1))
+      + "\nTP:    " + str.tostring(math.round(tp_p,   1))
+      + "\nR:R  1:" + str.tostring(i_tp_rr),
+      style=label.style_label_down,
+      color=color.new(color.red,5), textcolor=color.white, size=size.normal)
+
+// ─────────────────────────────────────────────────────────────
+// TP / SL / BREAKEVEN LINES
+// Using extend=extend.right so lines stretch automatically —
+// no need for set_x2() loops; this is the most reliable method
+// ─────────────────────────────────────────────────────────────
+
+var line ln_sl = na
+var line ln_tp = na
+var line ln_be = na
+var float v_sl = na
+var float v_tp = na
+var int   sig_d = 0
+
+if i_show_tpsl and long_sig
+    line.delete(ln_sl)
+    line.delete(ln_tp)
+    line.delete(ln_be)
+    v_sl  := close - atr * i_sl_mult
+    v_tp  := close + atr * i_sl_mult * i_tp_rr
+    float be = close + atr * i_sl_mult
+    ln_sl := line.new(bar_index, v_sl, bar_index + 1, v_sl,
+               color=color.red,                  width=2, style=line.style_dashed, extend=extend.right)
+    ln_tp := line.new(bar_index, v_tp, bar_index + 1, v_tp,
+               color=color.green,                width=2, style=line.style_dashed, extend=extend.right)
+    ln_be := line.new(bar_index, be,   bar_index + 1, be,
+               color=color.new(color.yellow,30), width=1, style=line.style_dotted, extend=extend.right)
+    sig_d := 1
+
+if i_show_tpsl and short_sig
+    line.delete(ln_sl)
+    line.delete(ln_tp)
+    line.delete(ln_be)
+    v_sl  := close + atr * i_sl_mult
+    v_tp  := close - atr * i_sl_mult * i_tp_rr
+    float be = close - atr * i_sl_mult
+    ln_sl := line.new(bar_index, v_sl, bar_index + 1, v_sl,
+               color=color.red,                  width=2, style=line.style_dashed, extend=extend.right)
+    ln_tp := line.new(bar_index, v_tp, bar_index + 1, v_tp,
+               color=color.green,                width=2, style=line.style_dashed, extend=extend.right)
+    ln_be := line.new(bar_index, be,   bar_index + 1, be,
+               color=color.new(color.yellow,30), width=1, style=line.style_dotted, extend=extend.right)
+    sig_d := -1
+
+// Auto-remove lines on TP/SL hit
+if sig_d != 0 and not na(v_sl) and not na(v_tp)
+    bool hit = (sig_d ==  1 and (low < v_sl or high > v_tp)) or
+               (sig_d == -1 and (high > v_sl or low  < v_tp))
+    if hit
+        line.delete(ln_sl)
+        line.delete(ln_tp)
+        line.delete(ln_be)
+        ln_sl := na
+        ln_tp := na
+        ln_be := na
+        v_sl  := na
+        v_tp  := na
+        sig_d := 0
+
+// ─────────────────────────────────────────────────────────────
+// SESSION BACKGROUND
+// ─────────────────────────────────────────────────────────────
+
+bgcolor(i_use_sess and in_sess ? color.new(color.yellow,96) : na, title="Session")
+
+// ─────────────────────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────────────────────
+
+var table t = table.new(position.top_right, 2, 13,
+  bgcolor=color.new(color.navy,10), border_color=color.new(color.navy,30),
+  border_width=1, frame_width=2, frame_color=color.new(color.navy,0))
+
+if i_show_dash and barstate.islast
+    table.cell(t, 0, 0, "🏦 SMC DASHBOARD", bgcolor=color.new(color.navy,0), text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 0, "STATUS",            bgcolor=color.new(color.navy,0), text_color=color.white, text_size=size.small)
+
+    string st = bias == 1 ? "🟢 BULLISH" : bias == -1 ? "🔴 BEARISH" : "⚪ NEUTRAL"
+    color  sc = bias == 1 ? color.new(color.green,50) : bias == -1 ? color.new(color.red,50) : color.new(color.gray,60)
+    table.cell(t, 0, 1, "Structure", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 1, st,          bgcolor=sc,                       text_color=color.black, text_size=size.small)
+
+    string ev = choch_bull ? "CHoCH ▲" : choch_bear ? "CHoCH ▼" : bos_bull ? "BOS ▲" : bos_bear ? "BOS ▼" : bull_sweep ? "🧹 Bull Sweep" : bear_sweep ? "🧹 Bear Sweep" : "—"
+    table.cell(t, 0, 2, "Last Event", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 2, ev,           bgcolor=color.new(color.gray,70), text_color=color.black, text_size=size.small)
+
+    string ob_t = in_bull_ob ? "🟢 Bull OB" : in_bear_ob ? "🔴 Bear OB" : "—"
+    color  ob_c = in_bull_ob ? color.new(color.green,60) : in_bear_ob ? color.new(color.red,60) : color.new(color.gray,70)
+    table.cell(t, 0, 3, "Order Block", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 3, ob_t,          bgcolor=ob_c,                     text_color=color.black, text_size=size.small)
+
+    string fv_t = in_bull_fvg ? "🟢 Bull FVG" : in_bear_fvg ? "🔴 Bear FVG" : "—"
+    color  fv_c = in_bull_fvg ? color.new(color.aqua,60) : in_bear_fvg ? color.new(color.orange,60) : color.new(color.gray,70)
+    table.cell(t, 0, 4, "FVG",  bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 4, fv_t,   bgcolor=fv_c,                     text_color=color.black, text_size=size.small)
+
+    string sw_t = bull_sweep ? "🧹 BULL" : bear_sweep ? "🧹 BEAR" : "—"
+    color  sw_c = bull_sweep ? color.new(color.teal,50) : bear_sweep ? color.new(color.maroon,50) : color.new(color.gray,70)
+    table.cell(t, 0, 5, "Liq Sweep", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 5, sw_t,         bgcolor=sw_c,                    text_color=color.black, text_size=size.small)
+
+    string z_t = in_disc ? "🟢 DISCOUNT" : "🔴 PREMIUM"
+    color  z_c = in_disc ? color.new(color.green,60) : color.new(color.red,60)
+    table.cell(t, 0, 6, "Zone",  bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 6, z_t,     bgcolor=z_c,                      text_color=color.black, text_size=size.small)
+
+    string em_t = ema_bull ? "🟢 Bull" : "🔴 Bear"
+    color  em_c = ema_bull ? color.new(color.green,70) : color.new(color.red,70)
+    table.cell(t, 0, 7, "EMA Bias", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 7, em_t,        bgcolor=em_c,                    text_color=color.black, text_size=size.small)
+
+    table.cell(t, 0, 8, "Volume", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 8, vol_ok ? "🟢 High" : "⚪ Normal",
+      bgcolor=vol_ok ? color.new(color.green,70) : color.new(color.gray,70), text_color=color.black, text_size=size.small)
+
+    table.cell(t, 0, 9, "Session", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 9, not i_use_sess ? "All Hours" : in_sess ? "🟢 ACTIVE" : "⚫ OFF",
+      bgcolor=not i_use_sess ? color.new(color.gray,70) : in_sess ? color.new(color.green,70) : color.new(color.gray,80),
+      text_color=color.black, text_size=size.small)
+
+    table.cell(t, 0, 10, "🟢 Long Score", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 10, str.tostring(long_score) + " / 6",
+      bgcolor=long_score >= i_min_score ? color.new(color.green,50) : color.new(color.gray,80), text_color=color.black, text_size=size.small)
+
+    table.cell(t, 0, 11, "🔴 Short Score", bgcolor=color.new(color.gray,80), text_color=color.black, text_size=size.small)
+    table.cell(t, 1, 11, str.tostring(short_score) + " / 6",
+      bgcolor=short_score >= i_min_score ? color.new(color.red,50) : color.new(color.gray,80), text_color=color.black, text_size=size.small)
+
+    string sg_t = long_sig  ? "🟢 BUY"  : short_sig ? "🔴 SELL" : "⏳ WAITING"
+    color  sg_c = long_sig  ? color.new(color.green,20) : short_sig ? color.new(color.red,20) : color.new(color.gray,60)
+    table.cell(t, 0, 12, "⚡ Signal", bgcolor=color.new(color.navy,0), text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 12, sg_t,         bgcolor=sg_c,                   text_color=color.white, text_size=size.small)
+
+// ─────────────────────────────────────────────────────────────
+// ALERTS
+// ─────────────────────────────────────────────────────────────
+
+alertcondition(long_sig,              "🟢 BUY  [BTC SMC V2]", "BTC SMC BUY  — {{close}}")
+alertcondition(short_sig,             "🔴 SELL [BTC SMC V2]", "BTC SMC SELL — {{close}}")
+alertcondition(long_sig or short_sig, "⚡ Any  [BTC SMC V2]", "BTC SMC Signal — {{close}}")
+alertcondition(bull_sweep, "🧹 Bull Sweep", "BTC Bull Sweep — {{close}}")
+alertcondition(bear_sweep, "🧹 Bear Sweep", "BTC Bear Sweep — {{close}}")
+
+// ═══════════════════════════════════════════════════════════════
+// END — BTC SMC + LIQUIDITY V2
+// ═══════════════════════════════════════════════════════════════
